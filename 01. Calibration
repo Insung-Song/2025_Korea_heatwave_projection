@@ -1,0 +1,78 @@
+# 초기 설정
+rm(list = ls())
+setwd('E:/insungsong/PROJ')
+
+library(exactextractr)
+library(terra)
+library(sf)
+library(data.table)
+library(dplyr)
+library(lubridate)
+
+# 기본 변수
+scenario <- c('ssp126','ssp245','ssp370','ssp585')
+gcm <- c('ACCESS-CM2','ACCESS-ESM1-5','CanESM5','CNRM-CM6-1','CNRM-ESM2-1',
+         'EC-Earth3','EC-Earth3-Veg-LR','FGOALS-g3','GFDL-ESM4','INM-CM4-8',
+         'MIROC6','MIROC-ES2L','MRI-ESM2-0','NorESM2-LM','NorESM2-MM')
+
+# 관측 및 경계 데이터
+sgg_shp <- st_read("shp/bnd_sigungu_00_2021_2021_4Q.shp") %>%
+  st_transform(crs = 4326)
+load("E:/insungsong/PROJ/obs_rhum.RData")
+
+# 날짜 정보
+date <- seq.Date(from = as.Date("2000-01-01"), to = as.Date("2100-12-31"), by = "day") %>%
+  .[!(month(.) == 2 & day(.) == 29)]
+
+# ISIMIP 보정 함수
+source("isimip3.R")
+
+# netCDF 불러와 shapefile 기준 평균 추출 (윤년 보정 포함)
+load_nc_extract <- function(file_path, shp) {
+  nc <- rast(file_path)
+  sgg_means <- exact_extract(nc, shp, 'weighted_mean', weights = 'area') %>% as.matrix()
+  if (ncol(sgg_means) == 366) sgg_means <- sgg_means[, -60]  # 윤년 보정
+  return(sgg_means)
+}
+
+# 메인 루프
+for (g in seq_along(gcm)) {
+  message("====== Processing GCM: ", gcm[g], " ======")
+  
+  # 결과 배열 초기화
+  prj <- array(NA, dim = c(250, 36865, length(scenario)),
+               dimnames = list(sgg_shp$SIGUNGU_CD, as.character(date), scenario))
+  prj_cal <- prj
+  
+  # 1. 공통 historical 자료 (2000~2014) 한번만 로딩
+  message("  → Loading historical data")
+  hist_files <- list.files(paste0('scenario_raw/hurs/historical/', gcm[g]), full.names = TRUE)
+  hist_data <- lapply(hist_files, load_nc_extract, shp = sgg_shp)
+  hist_matrix <- do.call(cbind, hist_data) 
+  
+  # 2. 시나리오별 미래 예측 처리
+  for (s in seq_along(scenario)) {
+    message("    → Scenario: ", scenario[s])
+    
+    # 미래 데이터 불러오기 및 병합
+    fut_files <- list.files(paste0('scenario_raw/hurs/', scenario[s], '/', gcm[g]), full.names = TRUE)
+    fut_data <- lapply(fut_files, load_nc_extract, shp = sgg_shp)
+    fut_matrix <- do.call(cbind, fut_data) 
+    
+    # ISIMIP 보정
+    for (k in 1:250) {
+      prj_cal[k,,s] <- isimip3(
+        obs[[k]],
+        hist_matrix[k,],
+        c(hist_matrix[k,],fut_matrix[k,]),
+        year(names(obs[[k]])),
+        rep(2000:2014, each = 365),
+        rep(2000:2100, each = 365),
+        detrend = FALSE
+      )
+    }
+  }
+  
+  # 결과 저장
+  save(prj_cal, file = paste0("HURS/", gcm[g], ".RData"))
+}
