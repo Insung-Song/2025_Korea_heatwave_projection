@@ -1,0 +1,77 @@
+result = as.data.frame.table(af_tot)
+result = data.table::data.table(result)
+result = subset(result, Var1 %in% c('historical','2021~2040','2041~2060','2061~2080','2081~2100'))
+result = subset(result, Var5 == 'no_adapt')
+result = result[,-'Var5']
+result$Freq = round(result$Freq,1)
+names(result) = c('Period','CI','Temp','SSP','AN')
+
+result_est = subset(result, CI == 'est')[,-c('CI')]
+result_ci.l = subset(result, CI == 'ci.l')[,-c('CI')]
+result_ci.u = subset(result, CI == 'ci.u')[,-c('CI')]
+result = cbind(result_est,ci.l=result_ci.l$AN,ci.u=result_ci.u$AN)
+rm(result_est,result_ci.l,result_ci.u)
+
+result.s1 = subset(result, SSP == 'SSP1-2.6')[,-'SSP']
+result.s2 = subset(result, SSP == 'SSP2-4.5')[,-'SSP']
+result.s3 = subset(result, SSP == 'SSP3-7.0')[,-'SSP']
+result.s5 = subset(result, SSP == 'SSP5-8.5')[,-'SSP']
+
+result.s1$SSP1 = paste0(result.s1$AN,'\n(',result.s1$ci.l,', ',result.s1$ci.u,')')
+result.s2$SSP2 = paste0(result.s2$AN,'\n(',result.s2$ci.l,', ',result.s2$ci.u,')')
+result.s3$SSP3 = paste0(result.s3$AN,'\n(',result.s3$ci.l,', ',result.s3$ci.u,')')
+result.s5$SSP5 = paste0(result.s5$AN,'\n(',result.s5$ci.l,', ',result.s5$ci.u,')')
+result = cbind(result.s1[,c(2,1,6)],result.s2[,6],result.s3[,6],result.s5[,6])
+rm(result.s1,result.s2,result.s3,result.s5)
+
+data.table::fwrite(result, file = 'D:/Projection/Data/result/result_af.csv')
+################################################################################
+an_tot_net = array(NA, dim = c(9, 3, 3, 4, 6),
+                   dimnames = list(
+                     dimnames(an_tot)[[1]],
+                     dimnames(an_tot)[[2]],
+                     c("non_opt", "ext_rel", "ext_abs"),
+                     dimnames(an_tot)[[4]],
+                     dimnames(an_tot)[[5]]
+                   ))
+an_tot_net[, , 1, , ] <- an_tot[, , 1, , ] + an_tot[, , 2, , ]
+an_tot_net[, , 2, , ] <- an_tot[, , 3, , ] + an_tot[, , 4, , ]
+an_tot_net[, , 3, , ] <- an_tot[, , 5, , ] + an_tot[, , 6, , ]
+for(p in 2:9){
+  for(c in 1:3){
+    for(t in 1:3){
+      for(s in 1:4){
+        for(ad in 1:6){
+          an_tot_net[p,c,t,s,ad] = an_tot_net[p,c,t,s,ad] - an_tot_net[1,c,t,s,1]
+        }
+      }
+    }
+  }
+}
+dimnames(an_tot_net)
+
+result = as.data.frame.table(an_tot_net)
+result = data.table::data.table(result)
+result = subset(result, Var1 %in% c('2021~2040','2041~2060','2061~2080','2081~2100'))
+result$Freq = round(result$Freq,1)
+names(result) = c('Period','CI','Temp','SSP','Adapt','AN')
+
+result_est = subset(result, CI == 'est')[,-c('CI')]
+result_ci.l = subset(result, CI == 'ci.l')[,-c('CI')]
+result_ci.u = subset(result, CI == 'ci.u')[,-c('CI')]
+result = cbind(result_est,ci.l=result_ci.l$AN,ci.u=result_ci.u$AN)
+rm(result_est,result_ci.l,result_ci.u)
+
+result.s1 = subset(result, SSP == 'SSP1-2.6')[,-'SSP']
+result.s2 = subset(result, SSP == 'SSP2-4.5')[,-'SSP']
+result.s3 = subset(result, SSP == 'SSP3-7.0')[,-'SSP']
+result.s5 = subset(result, SSP == 'SSP5-8.5')[,-'SSP']
+result.s1$SSP1 = paste0(result.s1$AN,'\n(',result.s1$ci.l,', ',result.s1$ci.u,')')
+result.s2$SSP2 = paste0(result.s2$AN,'\n(',result.s2$ci.l,', ',result.s2$ci.u,')')
+result.s3$SSP3 = paste0(result.s3$AN,'\n(',result.s3$ci.l,', ',result.s3$ci.u,')')
+result.s5$SSP5 = paste0(result.s5$AN,'\n(',result.s5$ci.l,', ',result.s5$ci.u,')')
+result = cbind(result.s1[,c(2,3,1,7)],result.s2[,7],result.s3[,7],result.s5[,7])
+result = result[order(result$Temp,result$Adapt,result$Period),]
+rm(result.s1,result.s2,result.s3,result.s5)
+
+data.table::fwrite(result, file = 'D:/Projection/Data/result/result_net.csv')
