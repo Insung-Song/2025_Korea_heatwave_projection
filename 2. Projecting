@@ -1,0 +1,224 @@
+# 초기화 및 라이브러리 로드
+rm(list = ls())
+library(data.table)
+library(dlnm)
+library(splines)
+library(MASS)
+library(tsModel)
+library(dplyr)
+library(mvmeta)
+library(stringr)
+
+# 데이터 로드
+load("D:/Projection/Data/mmt_lag21_knots3.RData")
+load("D:/Projection/Data/2nd_stage_lag21_knots3.RData")
+load("D:/Projection/Data/raw/dlist.RData")
+dlist_raw = dlist
+load("D:/Projection/Data/dlist.RData")
+load("D:/Projection/Data/dth_prj.RData")
+load("D:/Projection/Data/warming.RData")
+gcm_list <- substr(list.files("D:/Projection/Data/scenario/TMEAN"), 1, str_length(list.files("D:/Projection/Data/scenario/TMEAN")) - 6)
+sgg <- names(dlist)
+scenario <- c('SSP1-2.6', 'SSP2-4.5', 'SSP3-7.0', 'SSP5-8.5')
+age_group <- c('age_under74', 'age_over75')
+temp_types <- c('cold', 'heat', 'cs_rel', 'hw_rel', 'cs_abs', 'hw_abs')
+periods <- c('historical', '2021~2040', '2041~2060', '2061~2080', '2081~2100',
+             'warming_1.5', 'warming_2', 'warming_3', 'warming_4')
+adapt_labels <- c("no_adapt", "adapt_50%", "adapt_60%", "adapt_70%", "adapt_80%", "adapt_90%")
+adapt_rates <- c(0,0.5,0.6,0.7,0.8,0.9)
+ci = c("est", "ci.l", "ci.u")
+nsim <- 100
+pb <- txtProgressBar(min = 0, max = length(sgg), style = 3)  # 스타일 3: [===    ]
+
+
+for (g in 1:15) {
+  gcm <- gcm_list[g]
+  cat("\nProcessing GCM:", gcm, "\n")
+  
+  # GCM별 데이터 로드
+  load(paste0("D:/Projection/Data/scenario/TMEAN/", gcm, ".RData"))
+  load(paste0("D:/Projection/Data/scenario/TMIN/", gcm, ".RData"))
+  load(paste0("D:/Projection/Data/scenario/TMAX/", gcm, ".RData"))
+  load(paste0("D:/Projection/Data/scenario/RHUM/", gcm, ".RData"))
+  
+  ansim <- array(NA, dim = c(250, 2, 9, 6, 4, 6, nsim),
+                 dimnames = list(sgg, age_group, periods, temp_types,
+                                 scenario, adapt_labels, paste0("sim", 1:nsim)))
+  
+  dth_tot <- array(NA, dim = c(250, 2, 9, 4),
+                   dimnames = list(sgg, age_group, periods, scenario))
+  
+  for (i in seq_along(sgg)) {
+    setTxtProgressBar(pb, i)
+    dat_raw = as.data.frame(dlist_raw[[i]])
+    dat <- as.data.frame(dlist[[i]])
+    start_year <- dat$year[1]
+    
+    # --- predefine period indexing once per i ---
+    full_years <- rep(start_year:2100, each = 365)
+    full_years <- full_years[full_years != 2020]
+    len_seq <- length(full_years)
+    
+    nyear <- setNames(rep(NA, 9), periods)
+    nyear[1] <- 2020 - start_year
+    nyear[2:5] <- 20
+    seqperiod <- matrix(FALSE, len_seq, 9)
+    seqperiod[1:(nyear[1]*365), 1] <- TRUE
+    for (p in 2:5) {
+      from <- (nyear[1] + 20 * (p - 2)) * 365 + 1
+      to   <- (nyear[1] + 20 * (p - 1)) * 365
+      seqperiod[from:to, p] <- TRUE
+    }
+    
+    
+    # --- predefine spline basis + centering
+    tmean_qntl <- quantile(dat_raw$tmean, c(0.025, 0.975), na.rm = TRUE)
+    argvar <- list(fun = "ns", knots = quantile(dat_raw$tmean, c(0.1, 0.75, 0.9), na.rm = TRUE),
+                   Bound = range(dat_raw$tmean,na.rm=T))
+    coefsim <- array(NA, dim = c(4, 2, nsim))
+    coefsim[, 1, ] <- mvrnorm(nsim, blup1[[i]]$blup, blup1[[i]]$vcov)
+    coefsim[, 2, ] <- mvrnorm(nsim, blup2[[i]]$blup, blup2[[i]]$vcov)
+    cenvec <- lapply(1:2, function(a) do.call(onebasis, c(list(x = mmt[i, a]), argvar)))
+    
+    for (s in 1:4) {
+      tmean <- c(dat$tmean, tmean_prj[i, , s])
+      tmax  <- c(dat$tmax, tmax_prj[i, , s])
+      tmin  <- c(dat$tmin, tmin_prj[i, , s])
+      rhum  <- pmax(0, c(dat$rhum, rhum_prj[i, , s]))
+      dth   <- cbind(c(dat[, 9], dth_prj[i, 1, , s]),
+                     c(dat[,10], dth_prj[i, 2, , s]))
+      tw <- tmax * atan(0.151977 * sqrt(rhum + 9.313659)) + atan(tmax + rhum) -
+        atan(rhum - 1.67633) + 0.00391838 * rhum^(3/2) * atan(0.023101 * rhum) - 4.686035
+      tper <- -0.2442 + 0.55399 * tw + 0.45535 * tmax - 0.0022 * tw^2 + 0.00278 * tw * tmax + 3
+      
+      for (a in 1:2) {
+        # spline basis
+        bvar_raw <- do.call(onebasis, c(list(x = tmean), argvar))
+        bvar     <- scale(bvar_raw, center = cenvec[[a]], scale = FALSE)
+        eta_mat  <- bvar %*% coefsim[, a, ]
+        af_mat = 1-exp(-eta_mat)
+        af_mat[af_mat < 0] = 0
+        
+        # 온도 조건 미리 정의
+        seqtemp <- matrix(FALSE, nrow = length(tmean), ncol = 6)
+        seqtemp[,1] <- tmean <= mmt[i, a]
+        seqtemp[,2] <- tmean >  mmt[i, a]
+        seqtemp[,3] <- tmean <  tmean_qntl[1]
+        seqtemp[,4] <- tmean >  tmean_qntl[2]
+        seqtemp[,5] <- tmin < -12 & c(tmin[-1], tail(tmin, 1)) < -12
+        seqtemp[,6] <- tper > 33 & c(tper[-1], tail(tper, 1)) > 33
+        for (ad in seq_along(adapt_rates)) {
+          af_adj <- af_mat
+          af_adj[seqtemp[,2], ] <- af_adj[seqtemp[,2], ] * (1 - adapt_rates[ad])
+          af_dth <- af_adj * dth[, a]
+          
+          for (p in 1:9) {
+            if (is.na(nyear[p])) next
+            dth_tot[i, a, p, s] <- sum(dth[seqperiod[, p], a], na.rm = TRUE) / nyear[p]
+            
+            for (t in 1:6) {
+              sel <- seqtemp[, t] & seqperiod[, p]
+              if (!any(sel)) next
+              ansim[i, a, p, t, s, ad, ] <- colSums(af_dth[sel, , drop = FALSE], na.rm = TRUE) / nyear[p]
+            }
+          }
+        }
+      }
+    }
+  }
+  # 요약
+  an <- array(NA, dim = c(250, 2, 9, 3, 6, 4, 6),
+              dimnames = list(sgg, age_group, periods, ci,
+                              temp_types, scenario, adapt_labels))
+  an[,,, "est",,,] <- apply(ansim, c(1,2,3,4,5,6), function(x) mean(x, na.rm=TRUE))
+  an[,,, "ci.l",,,] <- apply(ansim, c(1,2,3,4,5,6), function(x) quantile(x, probs=0.025, na.rm=TRUE))
+  an[,,, "ci.u",,,] <- apply(ansim, c(1,2,3,4,5,6), function(x) quantile(x, probs=0.975, na.rm=TRUE))
+  #Testing validity
+  # af_tot = an_tot = array(NA, dim = c(9,3,6,4,4),
+  #                         dimnames = list(periods,c('est','ci.l','ci.u'),temp_types,scenario,adapt_labels))
+  # for(p in 1:9){
+  #   for(t in 1:6){
+  #     for(s in 1:4){
+  #       for(ad in 1:4){
+  #         an_tot[p,1,t,s,ad] = sum(an[,,p,1,t,s,ad],na.rm=T)
+  #         af_tot[p,1,t,s,ad] = an_tot[p,1,t,s,ad]/sum(dth_tot[,,p,s])*100
+  #       }
+  #     }
+  #   }
+  # }
+  # round(af_tot[1:5,1,'cold',,1],1)
+  # round(af_tot[1:5,1,'heat',,1],1)
+  # round(af_tot[1:5,1,'cold',,1]+af_tot[1:5,1,'heat',,1],1)
+  # round(af_tot[1:5,1,'cold',,2]+af_tot[1:5,1,'heat',,2],1)
+  # round(af_tot[1:5,1,'cold',,3]+af_tot[1:5,1,'heat',,3],1)
+  # round(af_tot[1:5,1,'cold',,4]+af_tot[1:5,1,'heat',,4],1)
+  # round(af_tot[1:5,1,'cs_rel',,1],1)
+  # round(af_tot[1:5,1,'hw_rel',,1],1)
+  # round(af_tot[1:5,1,'cs_rel',,1]+af_tot[1:5,1,'hw_rel',,1],1)
+  # round(af_tot[1:5,1,'cs_abs',,1],1)
+  # round(af_tot[1:5,1,'hw_abs',,1],1)
+  # round(af_tot[1:5,1,'cs_abs',,1]+af_tot[1:5,1,'hw_abs',,1],1)
+  save(an, dth_tot, file = paste0("D:/Projection/Data/result/", gcm, ".RData"))
+  close(pb)
+}
+rm(dat, dat_raw, tmean, tmax, tmin, 
+   rhum, dth, tper, tw, tmean_qntl, 
+   argvar, coefsim, cenvec, bvar, seqtemp, 
+   seqperiod, an, nyear, ansim, dth_tot)
+gc()
+warnings()
+
+an_ensemble = array(NA, dim = c(15,250,2,9,3,6,4,6))
+dth_tot_ensemble = array(NA, dim = c(15,250,2,9,4))
+for(g in 1:15){
+  load(paste0('D:/Projection/Data/result/ans/',list.files("D:/Projection/Data/result/ans")[g]))
+  an_ensemble[g,,,,,,,] = an
+  dth_tot_ensemble[g,,,,] = dth_tot
+  rm(an,dth_tot)
+}
+an_final = array(NA, dim = c(250,2,9,3,6,4,6),
+                 dimnames = list(sgg,age_group,periods,c('est','ci.l','ci.u'),temp_types,scenario,adapt_labels))
+af_final = array(NA, dim = c(250,2,9,3,6,4,6),
+                 dimnames = list(sgg,age_group,periods,c('est','ci.l','ci.u'),temp_types,scenario,adapt_labels))
+dth_tot_final = array(NA, dim = c(250,2,9,4),
+                      dimnames = list(sgg,age_group,periods,scenario))
+
+for(i in 1:250){
+  for(a in 1:2){
+    for(p in 1:9){
+      for(x in 1:3){
+        for(t in 1:6){
+          for(s in 1:4){
+            for(ad in 1:6){
+              an_final[i,a,p,x,t,s,ad] = mean(an_ensemble[,i,a,p,x,t,s,ad],na.rm=T)
+              dth_tot_final[i,a,p,s] = mean(dth_tot_ensemble[,i,a,p,s],na.rm=T)
+              af_final[i,a,p,x,t,s,ad] = mean(an_ensemble[,i,a,p,x,t,s,ad]/dth_tot_ensemble[,i,a,p,s]*100,na.rm=T)
+            }
+          }
+        }
+      }
+    }
+  }
+}
+an_tot = array(NA, dim = c(9,3,6,4,6),
+               dimnames = list(periods,c('est','ci.l','ci.u'),temp_types,scenario,adapt_labels))
+af_tot = array(NA, dim = c(9,3,6,4,6),
+               dimnames = list(periods,c('est','ci.l','ci.u'),temp_types,scenario,adapt_labels))
+dth_tot_tot = matrix(NA,9,4, dimnames = list(periods,scenario))
+for(p in 1:9){
+  for(c in 1:3){
+    for(t in 1:6){
+      for(s in 1:4){
+        for(ad in 1:6){
+          an_tot[p,c,t,s,ad] = sum(an_final[,,p,c,t,s,ad],na.rm=T)
+          dth_tot_tot[p,s] = sum(dth_tot_final[,,p,s],na.rm=T)
+          af_tot[p,c,t,s,ad] = an_tot[p,c,t,s,ad]/dth_tot_tot[p,s]
+        }
+      }
+    }
+  }
+}
+
+rm(an_ensemble,dth_tot_ensemble,dth_tot_final,dth_tot_tot)
+af_tot = af_tot*100
+save(an_final,af_final,an_tot,af_tot,file='../final_results.RData')
