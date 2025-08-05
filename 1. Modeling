@@ -1,23 +1,14 @@
 rm(list = ls())
 
-library(dlnm)
-library(splines)
-library(MASS)
-library(tsModel)
-library(dplyr)
-library(mvmeta)
-library(mixmeta)
-library(data.table)
-library(pls)
-library(lubridate)
+library(dlnm);library(splines);library(mixmeta)
 
 load("dlist.RData")
 load('mp.RData')
 
 sgg = names(dlist)
-
 coef = matrix(NA, 25, 4)
 vcov = lapply(1:25, function(x) matrix(NA, 4,4))
+
 pb <- txtProgressBar(min = 0, max = length(sgg), style = 3)  # 스타일 3: [===    ]
 for(i in 1:25){
   setTxtProgressBar(pb, i)
@@ -56,4 +47,3 @@ for(i in 1:25){
   rm(dat,argvar,bvar,pred)
 }
 save(mmt, file = "mmt.RData")
-close(pb))
