@@ -11,8 +11,8 @@ library(data.table)
 library(pls)
 library(lubridate)
 
-load("D:/Projection/sample/dlist.RData")
-mp = fread("D:/Projection/sample/mp.csv")
+load("dlist.RData")
+mp = fread("mp.csv")
 
 sgg = names(dlist)
 age_group = c('age_under74', 'age_over75')
@@ -48,7 +48,7 @@ blup = blup(mx,vcov=T)
 blup1 = blup[1:25]
 blup2 = blup[26:50]
 rm(mp, mx, blup)
-save(blup1, blup2, file = "D:/Projection/sample/2nd_stage.RData")
+save(blup1, blup2, file = "2nd_stage.RData")
 
 mmt = matrix(NA,25,2,dimnames=list(sgg,age_group))
 for(i in 1:25){
@@ -68,4 +68,4 @@ for(i in 1:25){
   mmt[i,2] = ifelse(mmt[i,2]>25, 25, mmt[i,2])
   rm(dat,argvar,bvar,pred)
 }
-save(mmt, file = "D:/Projection/sample/mmt.RData")
+save(mmt, file = "mmt.RData")
