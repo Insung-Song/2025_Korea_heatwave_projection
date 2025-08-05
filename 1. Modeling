@@ -12,7 +12,7 @@ library(pls)
 library(lubridate)
 
 load("dlist.RData")
-mp = fread("mp.csv")
+load('mp.RData')
 
 sgg = names(dlist)
 
@@ -56,4 +56,4 @@ for(i in 1:25){
   rm(dat,argvar,bvar,pred)
 }
 save(mmt, file = "mmt.RData")
-close(pb)
+close(pb))
