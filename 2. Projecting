@@ -1,13 +1,6 @@
 rm(list = ls())
 
-library(data.table)
-library(dlnm)
-library(splines)
-library(MASS)
-library(tsModel)
-library(dplyr)
-library(mvmeta)
-library(stringr)
+library(dlnm);library(MASS)
 
 # Loading Data
 load("mmt.RData")          
