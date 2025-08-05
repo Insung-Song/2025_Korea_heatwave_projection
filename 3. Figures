@@ -1,0 +1,48 @@
+rm(list = ls())
+
+load('results.RData')
+an_tot = apply(an,c(2,3,4,5),sum)
+
+periods <- c('historical', '2021~2040', '2041~2060', '2061~2080', '2081~2100')
+col = c('dodgerblue','coral','blue','red')
+
+jpeg("figure.jpg", width = 800, height = 600, quality = 90)
+par(mfrow = c(2,2), xaxs='i',yaxs='i', mar = c(0.5,0.5,0.5,0.5), oma = c(4,4,1,12))
+for(i in 1:4){
+  plot(NA, xlim = c(0.5,5.5), 
+       ylim = c(0, ifelse(i%in%c(1,2),5000,1100)), type = 'n', 
+       xlab = '', ylab = '', axes = F)
+  if(i %in% c(1,2)){
+    abline(h=seq(0,5000,1000),lty=2,col='gray')
+    axis(2,c(0,5000),labels=F,tck=F)
+    axis(4,c(0,5000),labels=F,tck=F)
+  }else{
+    abline(h=seq(0,1000,100),lty=2,col='gray')
+    axis(2,c(0,1100),labels=F,tck=F)
+    axis(4,c(0,1100),labels=F,tck=F)
+  }
+  abline(v=seq(1,5,1),lty=2,col='gray')
+  axis(1, c(0.5,5.5), labels =F, tck = F)
+  axis(3, c(0.5,5.5), labels =F, tck = F)
+  lines(1:5, an_tot[,'est',i,'no_adapt'],col = col[i],lwd=1)
+  points(1:5, an_tot[,'est',i,'no_adapt'],col = col[i], pch=16)
+  polygon(c(1:5,5:1), 
+          c(an_tot[1:5,'ci.u',i,'no_adapt'],rev(an_tot[1:5,'ci.l',i,'no_adapt'])),
+          col=adjustcolor(col[i],0.2), border = F)
+  if(i %in% c(3,4)){
+    axis(1,1:5,labels=periods,cex=0.8,cex.axis=0.8)
+    mtext('Periods',side=1,line=2.5,cex=0.9)
+  } 
+  if(i == 1) {
+    axis(2,seq(0,5000,1000),labels=seq(0,5,1),cex.axis=0.8) 
+    mtext('AN (1,000)',side=2,line=2.5,cex=0.9)
+  }
+  if(i == 3) {
+    axis(2,seq(0,1000,100),labels=seq(0,10,1),cex.axis=0.8) 
+    mtext('AN (100)',side=2,line=2.5,cex=0.9)
+  }
+}
+legend("topright", inset = c(-0.5, -0.1), xpd = NA,
+       legend = c("Non-optimal Cold", "Non-optimal Heat",'Cold spell','Heatwave'),
+       pch = 15, col = c('dodgerblue','coral','blue','red'), lty=c(1,1,1,1),bty = "n", cex = 1)
+dev.off()
