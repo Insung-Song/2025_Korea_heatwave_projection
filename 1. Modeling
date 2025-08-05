@@ -1,4 +1,5 @@
 rm(list = ls())
+
 library(dlnm)
 library(splines)
 library(MASS)
@@ -8,71 +9,50 @@ library(mvmeta)
 library(mixmeta)
 library(data.table)
 library(pls)
+library(lubridate)
 
-load("D:/Projection/Data/dlist.RData")
-load("D:/Projection/Data/raw/dlist.RData")
+load("D:/Projection/sample/dlist.RData")
+mp = fread("D:/Projection/sample/mp.csv")
+
 sgg = names(dlist)
-age_group <- c('age_under74', 'age_over75')
+age_group = c('age_under74', 'age_over75')
 
-
-coef <- matrix(NA, 500, 4)
-vcov <- lapply(1:500, function(x) matrix(NA, 4,4))
-
-for(i in 1:250){
-  dat <- dlist[[i]]
-  
-  argvar <- list(fun = "ns",
+coef = matrix(NA, 50, 4)
+vcov = lapply(1:50, function(x) matrix(NA, 4,4))
+pb <- txtProgressBar(min = 0, max = length(sgg), style = 3)  # 스타일 3: [===    ]
+for(i in 1:25){
+  setTxtProgressBar(pb, i)
+  dat = dlist[[i]]
+  argvar = list(fun = "ns",
                  knots = quantile(dat$tmean, c(0.1, 0.75, 0.9), na.rm = TRUE),
                  Bound = range(dat$tmean, na.rm = TRUE))
-  arglag <- list(fun = "ns",knots = logknots(21, nk = 3))
-  cb <- crossbasis(dat$tmean, argvar, arglag, lag = 21)
+  arglag = list(fun = "ns", knots = logknots(21, nk = 3))
+  cb = crossbasis(dat$tmean, argvar, arglag, lag = 21)
   
-  # argvar <- list(fun = "bs",
-  #                degree = 2,
-  #                knots = quantile(dat$tmean, c(0.1, 0.75, 0.9), na.rm = TRUE),
-  #                Bound = range(dat$tmean, na.rm = TRUE))
-  # arglag <- list(fun = "ns",knots = logknots(21, nk = 3))
-  # cb <- crossbasis(dat$tmean, argvar, arglag, lag = 21)
-  
-  m = glm(dth2 ~ cb + dow + ns(date, df = 7*length(unique(dat$year))),data = dat, family = quasipoisson)
-  red <- crossreduce(cb, m, cen = 22)
+  m = glm(dth_u74 ~ cb + dow + ns(date, df = 7*length(unique(dat$year))),data = dat, family = quasipoisson)
+  red = crossreduce(cb, m, cen = 10)
   coef[i,] = coef(red)
   vcov[[i]] = vcov(red)
   
-  m = glm(dth3 ~ cb + dow + ns(date, df = 7*length(unique(dat$year))),data = dat, family = quasipoisson)
-  red <- crossreduce(cb, m, cen = 22)
-  coef[i+250,] = coef(red)
-  vcov[[i+250]] = vcov(red)
-  print(i)
+  m = glm(dth_o75 ~ cb + dow + ns(date, df = 7*length(unique(dat$year))),data = dat, family = quasipoisson)
+  red <- crossreduce(cb, m, cen = 10)
+  coef[i+25,] = coef(red)
+  vcov[[i+25]] = vcov(red)
+  rm(dat, argvar, arglag, m, red)
 }
 
-grdp <- fread("D:/Projection/Data/grdp.csv")
-avgtmean <- sapply(dlist, function(x) mean(x$tmean, na.rm = TRUE))
-rangetmean <- sapply(dlist, function(x) diff(range(x$tmean, na.rm = TRUE)))
-mp = cbind(grdp,avgtmean,rangetmean)
 mp = rbind(mp,mp)
-mp$age = c(rep(0,250),rep(1,250))
-
+mp$age = c(rep(0,25),rep(1,25))
 mx = mixmeta(coef~.,dat=mp,vcov,random=~1|sgg,na.action=na.exclude)
 blup = blup(mx,vcov=T)
-blup1 = blup[1:250]
-blup2 = blup[251:500]
+blup1 = blup[1:25]
+blup2 = blup[26:50]
+rm(mp, mx, blup)
+save(blup1, blup2, file = "D:/Projection/sample/2nd_stage.RData")
 
-metapls = scale(mp[,c('grdp','avgtmean','rangetmean')])
-plsres = plsr(coef ~ metapls, center = F)
-npc = 1
-pcvar = predict(plsres, metapls, ncomp = 1:npc, type = 'scores')
-pcvar = matrix(pcvar, ncol = npc)
-colnames(pcvar) <- sprintf("pls%i", seq_len(npc))
-dat1 = cbind(sgg = mp$sgg, age = mp$age, pcvar)
-dat1 = as.data.table(dat1)
-mx_pls1 = mixmeta(coef~., dat=dat1, S = vcov, random = ~1|sgg, na.action=na.exclude)
-blup = blup(mx_pls1,vcov=T)
-blup1 = blup[1:250]
-blup2 = blup[251:500]
-
-mmt = matrix(NA,250,2,dimnames=list(sgg,age_group))
-for(i in 1:250){
+mmt = matrix(NA,25,2,dimnames=list(sgg,age_group))
+for(i in 1:25){
+  setTxtProgressBar(pb, i)
   dat <- dlist[[i]]
   argvar <- list(fun = "ns",
                  knots = quantile(dat$tmean, c(0.1, 0.75, 0.9), na.rm = TRUE),
@@ -86,7 +66,6 @@ for(i in 1:250){
   mmt[i,2] = pred$predvar[which.min(pred$allRRfit)]
   mmt[i,2] = ifelse(mmt[i,2]<22, 22, mmt[i,2])
   mmt[i,2] = ifelse(mmt[i,2]>25, 25, mmt[i,2])
+  rm(dat,argvar,bvar,pred)
 }
-
-save(blup1, blup2, file = "D:/Projection/Data/2nd_stage_pls1.RData")
-save(mmt, file = "D:/Projection/Data/mmt_pls1.RData")
+save(mmt, file = "D:/Projection/sample/mmt.RData")
