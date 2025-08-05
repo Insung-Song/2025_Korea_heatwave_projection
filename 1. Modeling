@@ -6,20 +6,27 @@ library(dlnm);library(splines);library(mixmeta)
 load("dlist.RData")
 load('mp.RData')
 
+# Predefining variables
 sgg = names(dlist)
 coef = matrix(NA, 25, 4)
 vcov = lapply(1:25, function(x) matrix(NA, 4,4))
 
+# First stage
 pb <- txtProgressBar(min = 0, max = length(sgg), style = 3) 
 for(i in 1:25){
   setTxtProgressBar(pb, i)
+
+  # 1. Loading data
   dat = dlist[[i]]
+
+  # 2. Defining basis
   argvar = list(fun = "ns",
                 knots = quantile(dat$tmean, c(0.1, 0.75, 0.9), na.rm = TRUE),
                 Bound = range(dat$tmean, na.rm = TRUE))
   arglag = list(fun = "ns", knots = logknots(21, nk = 3))
   cb = crossbasis(dat$tmean, argvar, arglag, lag = 21)
-  
+
+  # 3. Quasi-Poisson regression
   m = glm(dth ~ cb + dow + ns(date, df = 7*length(unique(dat$year))),data = dat, family = quasipoisson)
   red = crossreduce(cb, m, cen = 10)
   coef[i,] = coef(red)
@@ -27,11 +34,13 @@ for(i in 1:25){
   rm(dat, argvar, arglag, m, red, cb)
 }
 
+# Second stage
 mx = mixmeta(coef~.,dat=mp,vcov,random=~1|sgg,na.action=na.exclude)
 blup = blup(mx,vcov=T)
 save(blup, file = "2nd_stage.RData")
 rm(coef,vcov,mp,mx)
 
+# Calculating MMT
 mmt = rep(NA,25)
 names(mmt) = sgg
 for(i in 1:25){
