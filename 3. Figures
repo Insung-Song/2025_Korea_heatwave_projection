@@ -1,11 +1,14 @@
 rm(list = ls())
 
+# Loading and processing data
 load('results.RData')
 an_tot = apply(an,c(2,3,4,5),sum)
 
+# Predefining variables
 periods <- c('historical', '2021~2040', '2041~2060', '2061~2080', '2081~2100')
 col = c('dodgerblue','coral','blue','red')
 
+# Plot
 jpeg("figure.jpg", width = 800, height = 600, quality = 90)
 par(mfrow = c(2,2), xaxs='i',yaxs='i', mar = c(0.5,0.5,0.5,0.5), oma = c(4,4,1,12))
 for(i in 1:4){
